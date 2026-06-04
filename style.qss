@@ -1,0 +1,81 @@
+QFrame#sidebar {
+    background-color: #181825;
+    border-radius: 15px;
+}
+
+QFrame#webContainer {
+    background-color: #181825;
+    border-radius: 20px;
+}
+
+#navGroup {
+    background-color: #313244;
+    border-radius: 60px;
+}
+
+#navGroup QPushButton {
+    background: transparent;
+    color: #cdd6f4;
+    border: none;
+    min-width: 36px;
+    min-height: 36px;
+    font-size: 16px;
+    padding: 0px;
+    border-radius: 60px;
+}
+
+#navGroup QPushButton:hover {
+    background-color: #45475a;
+    color: #89b4fa;
+    border-radius: 60px;
+}
+
+#navGroup QPushButton:pressed {
+    background-color: #585b70;
+    border-radius: 60px;
+}
+
+#divider {
+    background-color: #45475a;
+}
+
+QLineEdit {
+    background-color: #313244;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    border-radius: 18px;
+    padding: 8px 14px;
+    font-size: 14px;
+}
+
+QLineEdit:focus {
+    border: 1px solid #89b4fa;
+}
+
+QToolBar {
+    background-color: #1e1e2e;
+    border: none;
+    spacing: 8px;
+    padding: 6px;
+}
+
+QTabWidget::pane {
+    border: none;
+}
+
+QTabBar::tab {
+    background: #313244;
+    color: #cdd6f4;
+    padding: 8px 16px;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    margin-right: 2px;
+}
+
+QTabBar::tab:selected {
+    background: #45475a;
+}
+
+QTabBar::tab:hover {
+    background: #585b70;
+}
