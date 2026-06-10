@@ -1,7 +1,7 @@
 import sys
 import os
 import re
-import google.generativeai as genai
+from groq import Groq
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QToolBar, QLineEdit, QTabWidget, QWidget, QStatusBar, QFrame, QHBoxLayout, QPushButton, QVBoxLayout, QLabel, QScrollArea, QSizePolicy, QMenu)
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtCore import QUrl, Qt, pyqtSignal, QThread, pyqtSlot
@@ -35,21 +35,25 @@ class AIWorker(QThread):
   response_ready = pyqtSignal(str)
   error = pyqtSignal(str)
 
-  def __init__(self, prompt, system=None):
+  def __init__(self, messages, system=None):
     super().__init__()
-    self.system = system or "You are helpful assistant built into a web browser."
+    self.messages = messages
+    self.system = system or "You are helpful assistant built into a web browser. Be concise"
 
   def run(self):
     try:
-      genai.configure(api_key=os.environ.get("GEMINI_API_KEY", " "))
-      model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
-        system_instruction=self.system
-      )
-      response = model.generate_content(self.prompt)
-      self.response_ready.emit(response.text)
+        client = Groq(api_key=os.environ.get("GROQ_API_KEY", ""))
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            max_tokens=1024,
+            messages=[
+                {"role": "system", "content": self.system},
+                *self.messages
+            ]
+        )
+        self.response_ready.emit(response.choices[0].message.content)
     except Exception as e:
-      self.error.emit(str(e))
+        self.error.emit(str(e))
 
 
 class SidebarTab(QFrame):
@@ -254,8 +258,57 @@ class Sidebar(QFrame):
     return len(self._tab_widgets)
   
 class AIPopup(QFrame):
+  message_sent = pyqtSignal(str)
+
   def __init__(self, parent=None):
-    super()
+    super().__init__(parent)
+    self.setObjectName("aiPopup")
+    self.setFixedHeight(420)
+    self.setMinimumHeight(340)
+
+    layout = QVBoxLayout(self)
+    layout.setContentsMargins(16, 14, 16, 14)
+    layout.setSpacing(8)
+
+    header = QHBoxLayout()
+    title = QLabel("AI Assistant")
+    title.setObjectName("aiTitle")
+    header.addWidget(title)
+    header.addStretch()
+    close_btn = QPushButton("x")
+    close_btn.setObjectName("aiClose")
+    close_btn.setFixedSize(20, 20)
+    close_btn.clicked.connect(self.hide)
+    header.addWidget(close_btn)
+    layout.addLayout(header)
+
+    self.chat_area = QScrollArea()
+    self.chat_area.setObjectName("aiChatArea")
+    self.chat_area.setWidgetResizable(True)
+    self.chat_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+    self.chat_container = QWidget()
+    self.chat_container.setObjectName("aiChatContainer")
+    self.chat_layout = QVBoxLayout(self.chat_container)
+    self.chat_layout.setContentsMargins(4, 4, 4, 4)
+    self.chat_layout.setSpacing(8)
+    self.chat_layout.addStretch()
+
+  def show_question(self, question):
+    self.question_label.setText(question)
+    self.answer_label.setText("Thinking...")
+    self.adjustSize()
+    self.show()
+
+  def show_answer(self, answer):
+    self.answer_label.setText(answer)
+    self.adjustSize()
+
+  def resizeEvent(self, event):
+    super().resizeEvent(event)
+    for child in self.children():
+      if isinstance(child, QPushButton) and child.objectName() == "aiClose":
+        child.move(self.width() - 28, 8)
 
 class Browser(QMainWindow):
 
@@ -266,6 +319,7 @@ class Browser(QMainWindow):
 
     self._browsers = []
     self._current_index = -1
+    self._ai_workers = []
 
     central = QWidget()
     central.setObjectName("centralWidget")
@@ -296,6 +350,8 @@ class Browser(QMainWindow):
     self.content_layout.setContentsMargins(0, 0, 0, 0)
     self.content_layout.setSpacing(0)
     main_layout.addWidget(self.content_area, 1)
+    self.ai_popup = AIPopup(self.content_area)
+    self.ai_popup.raise_()
 
     self.status = QStatusBar()
     self.status.setObjectName("statusBar")
@@ -319,6 +375,8 @@ class Browser(QMainWindow):
     browser.titleChanged.connect(self._on_title_changed)
     browser.loadStarted.connect(lambda: self.status.showMessage("Loading..."))
     browser.loadFinished.connect(lambda ok: self.status.showMessage("Done" if ok else "Error", 2000))
+    browser.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+    browser.customContextMenuRequested.connect(lambda pos, b=browser: self._show_context_menu(pos, b))
     idx = len(self._browsers)
     self._browsers.append(browser)
     self.content_layout.addWidget(browser)
@@ -343,7 +401,8 @@ class Browser(QMainWindow):
 
   def navigate(self):
     text = self.sidebar.url_bar.text().strip()
-    if not text:
+    if is_question(text):
+      self._ask_ai(text)
       return
     if "." in text and " " not in text:
       if not text.startswith("http"):
@@ -352,6 +411,84 @@ class Browser(QMainWindow):
     else:
       self.current_browser().setUrl(QUrl(f"https://www.google.com/search?q={text}"))
     self.current_browser().setFocus()
+
+  def ai_rename_tab(self, idx, title, url):
+    prompt = (
+      f"Page title: {title}\n"
+      f"URL: {url}\n\n"
+      f"Give me a short tab label for this page. Maximum 4 words. No punctuation. Just the label, nothing else."
+    )
+    worker = AIWorker(
+      prompt,
+      system="You generate very short browser tab labels. Respond with only the label, no explanation, no punctuation, maximum 4 words."
+    )
+    worker.response_ready.connect(lambda label, i=idx: self.sidebar.update_title(i, label.strip()))
+    worker.start()
+    self._ai_workers.append(worker)
+
+  def _ask_ai(self, question):
+    url = self.current_browser().url().toString() if self.current_browser() else ""
+    page_title = self.current_browser().title() if self.current_browser() else ""
+    system = (
+      "You are a helpful assistant built into a web browser."
+      "Be concise. Answer in 2-3 sentences max unless the question requires detail."
+    )
+    prompt = f"Current page: {page_title} ({url})\n\nQuestion: {question}"
+    self.ai_popup.show_question(question)
+    self._position_popup()
+    worker = AIWorker(prompt, system=system)
+    worker.response_ready.connect(self.ai_popup.show_answer)
+    worker.error.connect(lambda e: self.ai_popup.show_answer(f"Error: {e}"))
+    worker.start()
+    self._ai_workers.append(worker)
+    self.sidebar.url_bar.clear()
+
+  def _position_popup(self):
+    self.ai_popup.move(16, 16)
+    self.ai_popup.raise_()
+
+  def _show_context_menu(self, pos, browser):
+    menu = QFrame(self)
+    selected_action = menu.addAction("Ask AI about selection")
+    summarize_action = menu.addAction("Summarize this page")
+    action = menu.exec(browser.mapToGlobal(pos))
+    if action == selected_action:
+      browser.page().runJavaScript(
+        "window.getSelection().toString()",
+        lambda text: self._ask_ai_selection(text)
+      )
+    elif action == summarize_action:
+      browser.page().runJavaScript(
+        "document.body.innerText.slice(0, 3000)",
+        lambda text: self._summarize_page(text)
+      )
+
+  def _ask_ai_selection(self, selected_text):
+    if not selected_text or not selected_text.strip():
+      self.status.showMessage("No text selected", 2000)
+      return
+    prompt = f'The user selected this text on a webpage:\n\n"{selected_text}"\n\nExplain it clearly and concisely.'
+    self.ai_popup.show_question(f'"{selected_text[:80]}..."' if len(selected_text) > 80 else f'"{selected_text}"')
+    self._position_popup()
+    worker = AIWorker(prompt)
+    worker.response_ready.connect(self.ai_popup.show_answer)
+    worker.error.connect(lambda e: self.ai_popup.show_answer(f"Error: {e}"))
+    worker.start()
+    self._ai_workers.append(worker)
+
+  def _summarize_page(self, page_text):
+    if not page_text or not page_text.strip():
+      self.status.showMessage("Could not read page content", 2000)
+      return
+    title = self.current_browser().title() if self.current_browser() else "this page"
+    prompt = f"Summarize this webpage titled '{title}' in 3-4 sentences:\n\n{page_text}"
+    self.ai_popup.show_question(f"Summary of: {title[:60]}")
+    self._position_popup()
+    worker = AIWorker(prompt)
+    worker.response_ready.connect(self.ai_popup.show_answer)
+    worker.error.connect(lambda e: self.ai_popup.show_answer(f"Error: {e}"))
+    worker.start()
+    self._ai_workers.append(worker)
 
   def go_home(self):
     self.current_browser().setUrl(QUrl("https://google.com"))
@@ -375,9 +512,15 @@ class Browser(QMainWindow):
     sender_browser = self.sender()
     if sender_browser in self._browsers:
       idx = self._browsers.index(sender_browser)
-      self.sidebar.update_title(idx, title)
+      cleaned = clean_title(title)
+      self.sidebar.update_title(idx, cleaned)
       if sender_browser == self.current_browser():
         self.setWindowTitle(title or "Unus")
+        self.ai_rename_tab(idx, title, self.current_browser().url().toString())
+
+  def resizeEvent(self, event):
+    super().resizeEvent(event)
+    self._position_popup()
 
 app = QApplication(sys.argv)
 app.setApplicationName("Unus")

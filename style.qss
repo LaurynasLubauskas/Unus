@@ -243,3 +243,33 @@ QToolTip {
     padding: 5px 10px;
     font-size: 11px;
 }
+
+QFrame#aiPopup {
+    background: #161616;
+    border: 1px solid #2e2e2e;
+    border-radius: 10px;
+}
+
+QLabel#aiQuestion {
+    color: #888888;
+    font-size: 11px;
+    font-style: italic;
+}
+
+QLabel#aiAnswer {
+    color: #e2e2e2;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+QPushButton#aiClose {
+    background: transparent;
+    border: none;
+    color: #555555;
+    font-size: 11px;
+    padding: 0px;
+}
+
+QPushButton#aiClose:hover {
+    color: #aaaaaa;
+}
