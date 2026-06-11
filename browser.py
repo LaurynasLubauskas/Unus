@@ -263,8 +263,8 @@ class AIPopup(QFrame):
   def __init__(self, parent=None):
     super().__init__(parent)
     self.setObjectName("aiPopup")
+    self.setFixedWidth(380)
     self.setFixedHeight(420)
-    self.setMinimumHeight(340)
 
     layout = QVBoxLayout(self)
     layout.setContentsMargins(16, 14, 16, 14)
@@ -294,21 +294,66 @@ class AIPopup(QFrame):
     self.chat_layout.setSpacing(8)
     self.chat_layout.addStretch()
 
+    self.chat_area.setWidget(self.chat_container)
+    layout.addWidget(self.chat_area, 1)
+
+    input_row = QHBoxLayout()
+    input_row.setSpacing(6)
+
+    self.input = QLineEdit()
+    self.input.setObjectName("aiInput")
+    self.input.setPlaceholderText("Reply...")
+    self.input.returnPressed.connect(self._send)
+
+    send_btn = QPushButton("Send")
+    send_btn.setObjectName("aiSend")
+    send_btn.clicked.connect(self._send)
+
+    input_row.addWidget(self.input)
+    input_row.addWidget(send_btn)
+    layout.addLayout(input_row)
+
+    self.hide()
+
+  def _send(self):
+      text = self.input.text().strip()
+      if not text:
+        return
+      self.input.clear()
+      self.add_message(text, is_user=True)
+      self.message_sent.emit(text)
+
+  def add_message(self, text, is_user=False):
+      bubble = QLabel(text)
+      bubble.setWordWrap(True)
+      bubble.setObjectName("aiUserBubble" if is_user else "aiAssistantBubble")
+      bubble.setMaximumWidth(360)
+      self.chat_layout.insertWidget(self.chat_layout.count() - 1, bubble)
+      self._scroll_to_bottom()
+
+  def set_thinking(self):
+      self.add_message("Thinking...", is_user=False)
+      self._thinking_label = self.chat_layout.itemAt(self.chat_layout.count() - 2).widget()
+
+  def replace_thinking(self, text):
+      if hasattr(self, "_thinking_label") and self._thinking_label:
+        self._thinking_label.setText(text)
+        self._thinking_label = None
+      self._scroll_to_bottom()
+
+  def _scroll_to_bottom(self):
+      from PyQt6.QtCore import QTimer
+      QTimer.singleShot(50, lambda: self.chat_area.verticalScrollBar().setValue(
+        self.chat_area.verticalScrollBar().maximum()
+      ))
+
   def show_question(self, question):
-    self.question_label.setText(question)
-    self.answer_label.setText("Thinking...")
-    self.adjustSize()
-    self.show()
+      self.add_message(question, is_user=True)
+      self.set_thinking()
+      self.show()
 
   def show_answer(self, answer):
-    self.answer_label.setText(answer)
-    self.adjustSize()
-
-  def resizeEvent(self, event):
-    super().resizeEvent(event)
-    for child in self.children():
-      if isinstance(child, QPushButton) and child.objectName() == "aiClose":
-        child.move(self.width() - 28, 8)
+      self.replace_thinking(answer)
 
 class Browser(QMainWindow):
 
@@ -320,6 +365,8 @@ class Browser(QMainWindow):
     self._browsers = []
     self._current_index = -1
     self._ai_workers = []
+    self._conversation_history = []
+    self._conversation_system = ""
 
     central = QWidget()
     central.setObjectName("centralWidget")
@@ -351,6 +398,7 @@ class Browser(QMainWindow):
     self.content_layout.setSpacing(0)
     main_layout.addWidget(self.content_area, 1)
     self.ai_popup = AIPopup(self.content_area)
+    self.ai_popup.message_sent.connect(self._on_ai_reply)
     self.ai_popup.raise_()
 
     self.status = QStatusBar()
@@ -419,28 +467,27 @@ class Browser(QMainWindow):
       f"Give me a short tab label for this page. Maximum 4 words. No punctuation. Just the label, nothing else."
     )
     worker = AIWorker(
-      prompt,
+      [{"role": "user", "content": prompt}],
       system="You generate very short browser tab labels. Respond with only the label, no explanation, no punctuation, maximum 4 words."
     )
     worker.response_ready.connect(lambda label, i=idx: self.sidebar.update_title(i, label.strip()))
     worker.start()
     self._ai_workers.append(worker)
 
-  def _ask_ai(self, question):
+  def _ask_ai(self, question, system=None):
     url = self.current_browser().url().toString() if self.current_browser() else ""
     page_title = self.current_browser().title() if self.current_browser() else ""
-    system = (
+    self._conversation_system = system or (
       "You are a helpful assistant built into a web browser."
       "Be concise. Answer in 2-3 sentences max unless the question requires detail."
     )
-    prompt = f"Current page: {page_title} ({url})\n\nQuestion: {question}"
+    self._conversation_history = []
+    self._conversation_history.append(
+    {"role": "user", "content": f"Current page: {page_title} ({url})\n\nQuestion: {question}"}
+    )
     self.ai_popup.show_question(question)
     self._position_popup()
-    worker = AIWorker(prompt, system=system)
-    worker.response_ready.connect(self.ai_popup.show_answer)
-    worker.error.connect(lambda e: self.ai_popup.show_answer(f"Error: {e}"))
-    worker.start()
-    self._ai_workers.append(worker)
+    self._run_ai_worker()
     self.sidebar.url_bar.clear()
 
   def _position_popup(self):
@@ -467,28 +514,30 @@ class Browser(QMainWindow):
     if not selected_text or not selected_text.strip():
       self.status.showMessage("No text selected", 2000)
       return
-    prompt = f'The user selected this text on a webpage:\n\n"{selected_text}"\n\nExplain it clearly and concisely.'
-    self.ai_popup.show_question(f'"{selected_text[:80]}..."' if len(selected_text) > 80 else f'"{selected_text}"')
-    self._position_popup()
-    worker = AIWorker(prompt)
-    worker.response_ready.connect(self.ai_popup.show_answer)
-    worker.error.connect(lambda e: self.ai_popup.show_answer(f"Error: {e}"))
-    worker.start()
-    self._ai_workers.append(worker)
+    self._ask_ai(f'The user selected this text on webpage:\n\n"{selected_text}"\n\nExplain it clearly and concisely.')
 
   def _summarize_page(self, page_text):
     if not page_text or not page_text.strip():
       self.status.showMessage("Could not read page content", 2000)
       return
     title = self.current_browser().title() if self.current_browser() else "this page"
-    prompt = f"Summarize this webpage titled '{title}' in 3-4 sentences:\n\n{page_text}"
-    self.ai_popup.show_question(f"Summary of: {title[:60]}")
-    self._position_popup()
-    worker = AIWorker(prompt)
-    worker.response_ready.connect(self.ai_popup.show_answer)
-    worker.error.connect(lambda e: self.ai_popup.show_answer(f"Error: {e}"))
+    self._ask_ai(f"Summarize this webpage titled '{title}' in 3-4 sentences:\n\n{page_text}")
+
+  def _on_ai_reply(self, text):
+    self._conversation_history.append({"role": "user", "content": text})
+    self.ai_popup.set_thinking()
+    self._run_ai_worker()
+
+  def _run_ai_worker(self):
+    worker = AIWorker(self._conversation_history, system=self._conversation_system)
+    worker.response_ready.connect(self._on_ai_response)
+    worker.error.connect(lambda e: self.ai_popup.replace_thinking(f"Error: {e}"))
     worker.start()
     self._ai_workers.append(worker)
+
+  def _on_ai_response(self, text):
+    self._conversation_history.append({"role": "assistant", "content": text})
+    self.ai_popup.show_answer(text)
 
   def go_home(self):
     self.current_browser().setUrl(QUrl("https://google.com"))

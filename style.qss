@@ -1,5 +1,5 @@
 * {
-    font-family: "Segoe UI", -apple-system, sans-serif;
+    font-family: -apple-system, "Helvetica Neue", sans-serif;
     font-size: 13px;
     color: #e2e2e2;
     outline: none;
@@ -248,6 +248,7 @@ QFrame#aiPopup {
     background: #161616;
     border: 1px solid #2e2e2e;
     border-radius: 10px;
+    min-width: 380px;
 }
 
 QLabel#aiQuestion {
@@ -272,4 +273,66 @@ QPushButton#aiClose {
 
 QPushButton#aiClose:hover {
     color: #aaaaaa;
+}
+
+QLabel#aiTitle {
+    color: #aaaaaa;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+QScrollArea#aiChatArea {
+    background: transparent;
+    border: none;
+}
+
+QWidget#aiChatContainer {
+    background: transparent;
+}
+
+QLabel#aiUserBubble {
+    background: #2a2a2a;
+    color: #f0f0f0;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 12px;
+    max-width: 340px;
+}
+
+QLabel#aiAssistantBubble {
+    background: transparent;
+    color: #cccccc;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 12px;
+    max-width: 340px;
+}
+
+QLineEdit#aiInput {
+    background: #1c1c1c;
+    border: 1px solid #2e2e2e;
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: #d4d4d4;
+    font-size: 12px;
+}
+
+QLineEdit#aiInput:focus {
+    border: 1px solid #555555;
+    color: #f0f0f0;
+}
+
+QPushButton#aiSend {
+    background: #222222;
+    border: 1px solid #333333;
+    border-radius: 6px;
+    color: #cccccc;
+    font-size: 12px;
+    padding: 6px 12px;
+}
+
+QPushButton#aiSend:hover {
+    background: #2a2a2a;
+    color: #ffffff;
 }
